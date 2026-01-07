@@ -1,0 +1,3 @@
+{
+    "buildCommand": "bunx 1jm build --vercel"
+}

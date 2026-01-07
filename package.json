@@ -1,0 +1,19 @@
+{
+  "name": "1jm",
+  "version": "1.0.0",
+  "module": "src/index.ts",
+  "type": "module",
+  "bin": {
+    "1jm": "./bin/cli.ts"
+  },
+  "dependencies": {
+    "@types/bun": "latest",
+    "vite": "^7.3.1"
+  },
+  "peerDependencies": {
+    "hono": "*",
+    "react": "*",
+    "react-dom": "*",
+    "typescript": "^5"
+  }
+}

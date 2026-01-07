@@ -1,0 +1,20 @@
+{
+  "name": "{{NAME}}",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "bunx 1jm dev",
+    "start": "bunx 1jm start",
+    "build": "bunx 1jm build",
+    "build:vercel": "bunx 1jm build --vercel"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/bun": "latest"
+  }
+}
