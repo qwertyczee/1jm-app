@@ -37,7 +37,7 @@ export async function dev({
   const SERVER_PORT = 45828;
   const CLIENT_PORT = 3000;
 
-  console.log("🚀 Starting development environment...\n");
+  console.log(`🚀 Starting development environment on http://localhost:${CLIENT_PORT}\n`);
 
   if (useServer) {
     if (!(await isPortInUse(SERVER_PORT))) {
@@ -96,6 +96,4 @@ export async function dev({
       console.log(`${C} already running on ${CLIENT_PORT}`);
     }
   }
-
-  console.log("👀 Watching for changes...");
 }

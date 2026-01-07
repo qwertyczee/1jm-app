@@ -1,12 +1,28 @@
 // src/create.ts
 import { mkdir, writeFile, readFile } from "node:fs/promises";
-import { readdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readdirSync, existsSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { $ } from "bun";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEMPLATE_DIR = join(__dirname, "template");
+
+const getTemplateDir = () => {
+  const paths = [
+    resolve(__dirname, "..", "template"),
+    resolve(__dirname, "..", "..", "template"),
+    join(__dirname, "template"),
+  ];
+
+  for (const p of paths) {
+    if (existsSync(p) && readdirSync(p).length > 0) {
+      return p;
+    }
+  }
+  throw new Error("Template directory not found");
+};
+
+const TEMPLATE_DIR = getTemplateDir();
 
 export async function create(projectName: string) {
   if (!projectName) {
