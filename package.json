@@ -17,6 +17,14 @@
     "prepublishOnly": "npm run build",
     "prepack": "npm run build"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qwertyczee/1jm-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/qwertyczee/1jm-app/issues"
+  },
+  "homepage": "https://github.com/qwertyczee/1jm-app#readme",
   "keywords": [
     "hono",
     "vite",
