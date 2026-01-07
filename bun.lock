@@ -12,7 +12,7 @@
         "hono": "*",
         "react": "*",
         "react-dom": "*",
-        "typescript": "^5",
+        "typescript": "^5.9.3",
       },
     },
   },

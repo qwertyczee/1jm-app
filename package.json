@@ -1,11 +1,32 @@
 {
   "name": "1jm",
   "version": "1.0.0",
-  "module": "src/index.ts",
+  "description": "Full-stack framework with Hono + Vite React for Vercel on Bun runtime",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
   "type": "module",
   "bin": {
-    "1jm": "./bin/cli.ts"
+    "1jm": "./dist/bin/cli.js"
   },
+  "files": [
+    "dist/",
+    "src/template/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "hono",
+    "vite",
+    "react",
+    "bun",
+    "vercel",
+    "framework"
+  ],
+  "author": "",
+  "license": "MIT",
   "dependencies": {
     "@types/bun": "latest",
     "vite": "^7.3.1"
@@ -14,6 +35,6 @@
     "hono": "*",
     "react": "*",
     "react-dom": "*",
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   }
 }
