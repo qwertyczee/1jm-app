@@ -1,6 +1,6 @@
 {
   "name": "1jm",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Full-stack framework with Hono + Vite React for Vercel on Bun runtime",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -32,9 +32,13 @@
     "vite": "^7.3.1"
   },
   "peerDependencies": {
-    "hono": "*",
-    "react": "*",
-    "react-dom": "*",
+    "hono": "^4.11.3",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
     "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3"
   }
 }
