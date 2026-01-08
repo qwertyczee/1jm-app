@@ -1,4 +1,4 @@
-import { Project, SyntaxKind, Node } from "ts-morph";
+import ts from "typescript";
 import path from "path";
 import fs from "fs";
 
@@ -22,112 +22,103 @@ export function analyzeRoutes(projectCwd: string = process.cwd()): RouteAnalysis
     return [];
   }
 
-  const projectOptions = fs.existsSync(TS_CONFIG) 
-    ? { tsConfigFilePath: TS_CONFIG, skipAddingFilesFromTsConfig: true }
-    : {};
+  // 1. Setup Optimized Program
+  const configFile = ts.readConfigFile(TS_CONFIG, ts.sys.readFile);
+  const configParseResult = ts.parseJsonConfigFileContent(configFile.config, ts.sys, projectCwd);
+  
+  const program = ts.createProgram([ENTRY_FILE], {
+    ...configParseResult.options,
+    skipLibCheck: true,
+    skipDefaultLibCheck: true,
+    types: [],
+    noEmit: true,
+  });
 
-  const project = new Project(projectOptions);
+  const checker = program.getTypeChecker();
+  const sourceFile = program.getSourceFile(ENTRY_FILE);
 
-  try {
-    project.addSourceFileAtPath(ENTRY_FILE);
-    project.resolveSourceFileDependencies();
-  } catch (e) {
-    console.error(`\x1b[31m[ANALYZE]\x1b[0m Failed to load source files:`, e);
-    return [];
-  }
+  if (!sourceFile) return [];
 
   const results: RouteAnalysis[] = [];
 
-  // --- INTERNAL HELPER: Recursively Analyze Router Variables ---
-  function analyzeRouter(node: Node, routePrefix: string = "") {
-    // 1. Trace Identifiers (Variables)
-    if (Node.isIdentifier(node)) {
-      const definitions = node.getDefinitions();
-      if (definitions.length > 0) {
-        // [FIX] Optional chaining for safe access
-        const decl = definitions[0]?.getDeclarationNode();
-        if (decl && (Node.isImportSpecifier(decl) || Node.isImportClause(decl))) return;
-        if (decl && Node.isVariableDeclaration(decl)) {
-          const initializer = decl.getInitializer();
-          if (initializer) analyzeRouter(initializer, routePrefix);
-          return;
-        }
-      }
+  // 2. Index Identifiers
+  const identifierMap = new Map<string, ts.Identifier[]>();
+  function mapIdentifiers(node: ts.Node) {
+    if (ts.isIdentifier(node)) {
+      const text = node.text;
+      if (!identifierMap.has(text)) identifierMap.set(text, []);
+      identifierMap.get(text)!.push(node);
     }
+    ts.forEachChild(node, mapIdentifiers);
+  }
+  mapIdentifiers(sourceFile);
 
-    // 2. Find usage in source file
-    const sourceFile = node.getSourceFile();
-    let varName = "";
+  // 3. Recursive Router Analyzer
+  function analyzeRouter(routerVarName: string, routePrefix: string) {
+    const usages = identifierMap.get(routerVarName) || [];
 
-    if (Node.isVariableDeclaration(node)) {
-      varName = node.getName();
-    } else if (Node.isNewExpression(node)) {
-      const parent = node.getParent();
-      if (Node.isVariableDeclaration(parent)) varName = parent.getName();
-    }
+    for (const usage of usages) {
+      const parent = usage.parent;
 
-    if (varName) {
-      const references = sourceFile.getDescendantsOfKind(SyntaxKind.Identifier)
-        .filter(id => id.getText() === varName);
+      if (ts.isPropertyAccessExpression(parent) && parent.expression === usage) {
+        const callExpr = parent.parent;
+        
+        if (ts.isCallExpression(callExpr)) {
+          const method = parent.name.text;
+          const args = callExpr.arguments;
 
-      for (const ref of references) {
-        const parent = ref.getParent();
+          if (args.length === 0) continue;
 
-        // Check for: app.get(), app.post(), app.route()
-        if (Node.isPropertyAccessExpression(parent) && parent.getExpression() === ref) {
-          const callExpr = parent.getParent();
-          if (Node.isCallExpression(callExpr)) {
-            const method = parent.getName();
-            const args = callExpr.getArguments();
+          // A. Handle Routes
+          if (["get", "post", "put", "delete", "patch"].includes(method)) {
+            const pathNode = args[0];
+            if (!pathNode) continue;
 
-            if (args.length === 0) continue;
+            if (ts.isStringLiteral(pathNode)) {
+              const localPath = pathNode.text;
+              const fullPath = (routePrefix + localPath).replace(/\/+/g, "/");
 
-            // HANDLE METHODS: app.get, app.post, etc.
-            if (["get", "post", "put", "delete", "patch"].includes(method)) {
-              const pathNode = args[0];
-              // [FIX] Ensure pathNode exists (though length check above handles it usually)
-              if (pathNode && Node.isStringLiteral(pathNode)) {
-                const localPath = pathNode.getLiteralText();
-                const fullPath = (routePrefix + localPath).replace(/\/+/g, "/");
+              if (fullPath.includes(":") || fullPath.includes("*")) {
+                results.push({ method: method.toUpperCase(), path: fullPath, type: "DYNAMIC", reason: "Route has params/wildcards" });
+                continue;
+              }
 
-                let routeStatus: "STATIC" | "DYNAMIC" = "STATIC";
-                let failReason = "";
+              let routeStatus: "STATIC" | "DYNAMIC" = "STATIC";
+              let failReason = "";
 
-                // Check EVERY argument (Middlewares + Handler)
-                for (let i = 1; i < args.length; i++) {
-                  // [FIX] Safe access or non-null assertion since we are iterating known length
-                  const handlerNode = args[i];
-                  if (!handlerNode) continue;
+              for (let i = 1; i < args.length; i++) {
+                const handlerNode = args[i];
+                if (!handlerNode) continue;
 
-                  const analysis = analyzeHandler(handlerNode);
+                const analysis = analyzeHandler(handlerNode, checker);
 
-                  if (!analysis.isStatic) {
-                    routeStatus = "DYNAMIC";
-                    const isMiddleware = i < args.length - 1;
-                    failReason = isMiddleware
-                      ? `Middleware [Arg ${i}] is dynamic: ${analysis.reason}`
-                      : analysis.reason || "Unknown";
-                    break;
-                  }
+                if (!analysis.isStatic) {
+                  routeStatus = "DYNAMIC";
+                  const isMiddleware = i < args.length - 1;
+                  failReason = isMiddleware
+                    ? `Middleware [Arg ${i}] is dynamic: ${analysis.reason}`
+                    : analysis.reason || "Unknown";
+                  break; 
                 }
-
-                results.push({
-                  method: method.toUpperCase(),
-                  path: fullPath,
-                  type: routeStatus,
-                  reason: routeStatus === "DYNAMIC" ? failReason : undefined
-                });
               }
+
+              results.push({
+                method: method.toUpperCase(),
+                path: fullPath,
+                type: routeStatus,
+                reason: routeStatus === "DYNAMIC" ? failReason : undefined
+              });
             }
+          }
 
-            // HANDLE ROUTER: app.route('/auth', authApp)
-            if (method === "route") {
-              const pathNode = args[0];
-              const subAppNode = args[1];
-              if (pathNode && Node.isStringLiteral(pathNode) && subAppNode) {
-                const newPrefix = (routePrefix + pathNode.getLiteralText()).replace(/\/+/g, "/");
-                analyzeRouter(subAppNode, newPrefix);
-              }
+          // B. Handle Sub-Routers
+          if (method === "route" && args.length >= 2) {
+            const pathNode = args[0];
+            const subAppNode = args[1];
+
+            if (pathNode && subAppNode && ts.isStringLiteral(pathNode) && ts.isIdentifier(subAppNode)) {
+               const newPrefix = (routePrefix + pathNode.text).replace(/\/+/g, "/");
+               analyzeRouter(subAppNode.text, newPrefix);
             }
           }
         }
@@ -135,162 +126,247 @@ export function analyzeRoutes(projectCwd: string = process.cwd()): RouteAnalysis
     }
   }
 
-  // Start analysis
-  const entrySourceFile = project.getSourceFileOrThrow(ENTRY_FILE);
-  const honoVars = entrySourceFile.getVariableDeclarations().filter(decl => {
-    const init = decl.getInitializer();
-    return init && Node.isNewExpression(init) && init.getExpression().getText().includes("Hono");
+  // 4. Start Analysis
+  let rootRouterName: string | undefined;
+
+  ts.forEachChild(sourceFile, (node) => {
+    if (ts.isExportAssignment(node) && !node.isExportEquals && ts.isIdentifier(node.expression)) {
+      rootRouterName = node.expression.text;
+    }
   });
 
-  if (honoVars.length > 0 && honoVars[0]) {
-    // [FIX] Explicit check or guaranteed existence due to length > 0
-    analyzeRouter(honoVars[0]);
+  if (!rootRouterName && identifierMap.has("app")) rootRouterName = "app";
+
+  if (!rootRouterName) {
+    ts.forEachChild(sourceFile, (node) => {
+      if (!rootRouterName && ts.isVariableStatement(node)) {
+        node.declarationList.declarations.forEach(decl => {
+          if (decl.initializer && ts.isNewExpression(decl.initializer)) {
+            const expr = decl.initializer.expression;
+            if (ts.isIdentifier(expr) && expr.text.includes("Hono")) {
+              if (ts.isIdentifier(decl.name)) rootRouterName = decl.name.text;
+            }
+          }
+        });
+      }
+    });
   }
+
+  if (rootRouterName) analyzeRouter(rootRouterName, "");
 
   return results.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+// --- ANALYSIS HELPERS ---
 
-// --- PRIVATE AST HELPERS ---
-
-function analyzeHandler(node: Node): { isStatic: boolean; reason?: string } {
-  let funcBody = node;
-
-  // Resolve Identifier (e.g., imported handlers)
-  if (Node.isIdentifier(node)) {
-    const defs = node.getDefinitions();
-    if (defs.length > 0) {
-      // [FIX] Safe access
-      const decl = defs[0]?.getDeclarationNode();
-      if (decl && Node.isVariableDeclaration(decl) && decl.getInitializer()) {
-        const init = decl.getInitializer();
-        if (init) funcBody = init;
-      } else if (decl && Node.isFunctionDeclaration(decl)) {
-        funcBody = decl;
-      } else {
-        return { isStatic: false, reason: `External/Imported function '${node.getText()}'` };
-      }
-    } else {
-      return { isStatic: false, reason: "Unresolvable Identifier" };
-    }
-  }
-
-  if (
-    Node.isArrowFunction(funcBody) || 
-    Node.isFunctionExpression(funcBody) || 
-    Node.isFunctionDeclaration(funcBody)
-  ) {
-    const text = funcBody.getText();
+function analyzeHandler(node: ts.Node, checker: ts.TypeChecker): { isStatic: boolean; reason?: string } {
+  if (ts.isIdentifier(node)) {
+    const symbol = checker.getSymbolAtLocation(node);
+    if (!symbol) return { isStatic: false, reason: "Unresolved Identifier" };
     
-    // Strict Global Checks
-    if (text.includes("Date.now()") || text.includes("Math.") || text.includes("process.") || text.includes("new Date")) {
-      return { isStatic: false, reason: "Uses Dynamic Global" };
-    }
-    // Strict Middleware Check
-    if (text.includes("next()")) {
-      return { isStatic: false, reason: "Middleware chain (calls next)" };
-    }
+    const decl = getDeclaration(symbol, checker);
+    if (!decl) return { isStatic: false, reason: "No definition found" };
 
-    // Handle Implicit Returns: (c) => c.json(...)
-    if (Node.isArrowFunction(funcBody)) {
-      const body = funcBody.getBody();
-      if (!Node.isBlock(body)) {
-        return analyzeReturnExpression(body);
-      }
+    if (ts.isVariableDeclaration(decl) && decl.initializer) {
+      return analyzeHandler(decl.initializer, checker);
     }
-
-    // Handle Explicit Returns
-    const returns = funcBody.getDescendantsOfKind(SyntaxKind.ReturnStatement);
-    if (returns.length === 0) return { isStatic: false, reason: "No implicit or explicit return" };
-
-    for (const ret of returns) {
-      const expr = ret.getExpression();
-      if (!expr) return { isStatic: false, reason: "Empty return statement" };
-      
-      const analysis = analyzeReturnExpression(expr);
-      if (!analysis.isStatic) return analysis;
+    if (ts.isFunctionDeclaration(decl)) {
+      return analyzeFunctionBody(decl, checker);
     }
-
-    return { isStatic: true };
+    return { isStatic: false, reason: "External function" };
   }
 
-  return { isStatic: false, reason: "Unknown Structure" };
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+    return analyzeFunctionBody(node, checker);
+  }
+
+  return { isStatic: false, reason: "Unknown Handler" };
 }
 
-function analyzeReturnExpression(expr: Node): { isStatic: boolean; reason?: string } {
-  if (Node.isCallExpression(expr)) {
-    const propAccess = expr.getExpression();
-    
-    // Handle chaining: c.status(200).json(...)
-    if (Node.isPropertyAccessExpression(propAccess) && ["json", "text", "html"].includes(propAccess.getName())) {
-      // [FIX] Check for undefined arguments
-      const jsonArg = expr.getArguments()[0];
-      if (!jsonArg) {
-         // c.json() with no args? Likely an error or empty response, treating as Static Empty
-         return { isStatic: true }; 
+function analyzeFunctionBody(func: ts.FunctionLikeDeclaration, checker: ts.TypeChecker): { isStatic: boolean; reason?: string } {
+  const text = func.getText();
+  
+  // 1. Text Scan
+  if (text.includes("Date.now()") || text.includes("Math.") || text.includes("process.env") || text.includes("bun.env")) {
+    return { isStatic: false, reason: "Uses Dynamic Global" };
+  }
+  if (text.includes("next()")) {
+    return { isStatic: false, reason: "Middleware chain (calls next)" };
+  }
+
+  // 2. Context Usage Scan (AST)
+  const contextParam = func.parameters[0];
+  if (contextParam && ts.isIdentifier(contextParam.name)) {
+    const contextName = contextParam.name.text;
+    let isImpure = false;
+    let impurityReason = "";
+
+    function checkContextUsage(n: ts.Node) {
+      if (isImpure) return;
+      
+      // A. Check for Property Access: c.req, c.env
+      if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression)) {
+        if (n.expression.text === contextName) {
+          const prop = n.name.text;
+          const allowed = ["json", "text", "html", "body", "status", "header", "set", "var", "render"]; 
+          if (!allowed.includes(prop)) {
+            isImpure = true;
+            impurityReason = `Uses dynamic context: c.${prop}`;
+          }
+        }
+      }
+
+      // B. Check for Destructuring: const { req } = c
+      if (ts.isVariableDeclaration(n) && n.initializer && ts.isIdentifier(n.initializer)) {
+         if (n.initializer.text === contextName) {
+            if (ts.isObjectBindingPattern(n.name)) {
+               for (const el of n.name.elements) {
+                  const propName = (el.propertyName || el.name).getText();
+                  const allowed = ["json", "text", "html", "body", "status", "header", "set", "var", "render"]; 
+                   if (!allowed.includes(propName)) {
+                      isImpure = true;
+                      impurityReason = `Uses dynamic context: c.${propName}`;
+                   }
+               }
+            } else {
+               isImpure = true;
+               impurityReason = "Aliasing context object";
+            }
+         }
       }
       
-      if (!isDeeplyStatic(jsonArg)) {
+      ts.forEachChild(n, checkContextUsage);
+    }
+    
+    checkContextUsage(func.body || func);
+    if (isImpure) return { isStatic: false, reason: impurityReason };
+  }
+
+  // 3. Return Analysis
+  const body = func.body;
+  if (!body) return { isStatic: false, reason: "No Body" };
+
+  if (!ts.isBlock(body)) {
+    return analyzeReturn(body, checker);
+  }
+
+  let hasReturn = false;
+  let failReason: string | undefined;
+
+  function findReturns(n: ts.Node) {
+    if (failReason) return; 
+    if (ts.isReturnStatement(n) && n.expression) {
+      hasReturn = true;
+      const res = analyzeReturn(n.expression, checker);
+      if (!res.isStatic) failReason = res.reason;
+    }
+    if (!ts.isFunctionLike(n)) ts.forEachChild(n, findReturns);
+  }
+  
+  findReturns(body);
+
+  if (!hasReturn) return { isStatic: false, reason: "No return" };
+  if (failReason) return { isStatic: false, reason: failReason };
+
+  return { isStatic: true };
+}
+
+function analyzeReturn(expr: ts.Node, checker: ts.TypeChecker): { isStatic: boolean; reason?: string } {
+  if (ts.isCallExpression(expr) && ts.isPropertyAccessExpression(expr.expression)) {
+    const method = expr.expression.name.text;
+    
+    if (["json", "text", "html"].includes(method)) {
+        const arg = expr.arguments[0];
+        if (!arg) return { isStatic: true };
+        
+        if (isDeeplyStatic(arg, checker)) return { isStatic: true };
         return { isStatic: false, reason: "Response body has variables" };
-      }
-      return { isStatic: true };
     }
   }
-  return { isStatic: false, reason: "Complex return value (not c.json)" };
+  return { isStatic: false, reason: "Complex return value" };
 }
 
-function isDeeplyStatic(node: Node, depth = 0): boolean {
+function isDeeplyStatic(node: ts.Node, checker: ts.TypeChecker, depth = 0): boolean {
   if (depth > 10) return false;
 
-  const kind = node.getKind();
-  // Keywords
-  if (kind === SyntaxKind.TrueKeyword || kind === SyntaxKind.FalseKeyword || kind === SyntaxKind.NullKeyword) return true;
-
-  // Literals
+  const k = node.kind;
+  
   if (
-    Node.isStringLiteral(node) || 
-    Node.isNumericLiteral(node) ||
-    Node.isNoSubstitutionTemplateLiteral(node)
+    ts.isStringLiteral(node) || 
+    ts.isNumericLiteral(node) || 
+    k === ts.SyntaxKind.TrueKeyword || 
+    k === ts.SyntaxKind.FalseKeyword || 
+    k === ts.SyntaxKind.NullKeyword ||
+    ts.isNoSubstitutionTemplateLiteral(node)
   ) return true;
 
-  // Arrays
-  if (Node.isArrayLiteralExpression(node)) {
-    return node.getElements().every(e => isDeeplyStatic(e, depth + 1));
+  if (ts.isArrayLiteralExpression(node)) {
+    return node.elements.every(e => isDeeplyStatic(e, checker, depth + 1));
   }
 
-  // Objects
-  if (Node.isObjectLiteralExpression(node)) {
-    return node.getProperties().every(p => {
-      // Shorthand: { version } -> trace 'version'
-      if (Node.isShorthandPropertyAssignment(p)) {
-        return isDeeplyStatic(p.getNameNode(), depth + 1);
+  if (ts.isObjectLiteralExpression(node)) {
+    return node.properties.every(p => {
+      // 1. Handle Spread Assignment: { ...base }
+      if (ts.isSpreadAssignment(p)) {
+         return isDeeplyStatic(p.expression, checker, depth + 1);
       }
-      // Assignment: key: value
-      if (Node.isPropertyAssignment(p)) {
-        const nameNode = p.getNameNode();
-        // Reject computed keys: { [key]: val }
-        if (nameNode.getKind() === SyntaxKind.ComputedPropertyName) return false;
-        
-        const init = p.getInitializer();
-        // [FIX] Ensure initializer exists
-        return init ? isDeeplyStatic(init, depth + 1) : false;
+
+      // 2. Handle Computed Properties: { [key]: val }
+      // Only check name if it exists and is computed
+      if (p.name && ts.isComputedPropertyName(p.name)) {
+        if (!isDeeplyStatic(p.name.expression, checker, depth + 1)) return false;
       }
-      return false; // Spread, methods etc.
+      
+      // 3. Handle Values (PropertyAssignment or Shorthand)
+      if (ts.isPropertyAssignment(p)) return isDeeplyStatic(p.initializer, checker, depth + 1);
+      
+      if (ts.isShorthandPropertyAssignment(p)) {
+        const symbol = checker.getShorthandAssignmentValueSymbol(p);
+        if (!symbol) return false;
+        const decl = getDeclaration(symbol, checker);
+        return decl && ts.isVariableDeclaration(decl) && decl.initializer 
+          ? isDeeplyStatic(decl.initializer, checker, depth + 1) 
+          : false;
+      }
+      return false; 
     });
   }
 
-  // Identifier Tracing
-  if (Node.isIdentifier(node)) {
-    const defs = node.getDefinitions();
-    if (defs.length > 0) {
-      // [FIX] Safe access
-      const decl = defs[0]?.getDeclarationNode();
-      if (decl && Node.isVariableDeclaration(decl)) {
-        const init = decl.getInitializer();
-        return init ? isDeeplyStatic(init, depth + 1) : false;
-      }
+  if (ts.isPropertyAccessExpression(node)) {
+    const symbol = checker.getSymbolAtLocation(node);
+    if (!symbol) return false;
+    
+    const decl = getDeclaration(symbol, checker);
+    if (!decl) return false;
+
+    if (ts.isPropertyAssignment(decl)) {
+      return isDeeplyStatic(decl.initializer, checker, depth + 1);
+    }
+    if (ts.isVariableDeclaration(decl) && decl.initializer) {
+      return isDeeplyStatic(decl.initializer, checker, depth + 1);
+    }
+  }
+
+  if (ts.isIdentifier(node)) {
+    if (node.text === "undefined") return true;
+    const symbol = checker.getSymbolAtLocation(node);
+    if (!symbol) return false;
+
+    const decl = getDeclaration(symbol, checker);
+    if (decl && ts.isVariableDeclaration(decl) && decl.initializer) {
+      const isConst = (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0;
+      if (!isConst) return false;
+      return isDeeplyStatic(decl.initializer, checker, depth + 1);
     }
   }
 
   return false;
+}
+
+function getDeclaration(symbol: ts.Symbol, checker: ts.TypeChecker): ts.Declaration | undefined {
+  if (symbol.flags & ts.SymbolFlags.Alias) {
+    const alias = checker.getAliasedSymbol(symbol);
+    return alias.valueDeclaration || alias.declarations?.[0];
+  }
+  return symbol.valueDeclaration || symbol.declarations?.[0];
 }
