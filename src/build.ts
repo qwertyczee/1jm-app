@@ -1,7 +1,8 @@
 // src/build.ts
 import { rm, mkdir } from "node:fs/promises";
 import { readdirSync, statSync, existsSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join } from "node:path";
+import { analyzeRoutes } from "./analyze.js";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -28,7 +29,13 @@ function printFiles(dir: string, filterHidden = true) {
   return files;
 }
 
-export async function build({ isVercel: isVercelArg }: { isVercel?: boolean }) {
+export async function build({
+  isVercel: isVercelArg,
+  static: isStaticArg,
+}: {
+  isVercel?: boolean;
+  static?: boolean;
+}) {
   const isVercel = isVercelArg || !!process.env.VERCEL;
   const CWD = process.cwd();
 
@@ -46,6 +53,9 @@ export async function build({ isVercel: isVercelArg }: { isVercel?: boolean }) {
   const SERVER_ENTRY = join(CWD, "server/index.ts");
 
   console.log(`\nBuilding for ${isVercel ? "Vercel" : "Production"}...`);
+  if (isVercel && isStaticArg) {
+    console.log("⚡ Static Optimization Enabled");
+  }
 
   await rm(BASE_OUT, { recursive: true, force: true });
   await mkdir(FUNC_DIR, { recursive: true });
@@ -102,6 +112,7 @@ export async function build({ isVercel: isVercelArg }: { isVercel?: boolean }) {
   }
 
   if (isVercel) {
+    // 1. Generate Function Config
     const funcConfig = {
       handler: "index.js",
       runtime: "bun1.x",
@@ -117,17 +128,70 @@ export async function build({ isVercel: isVercelArg }: { isVercel?: boolean }) {
       JSON.stringify(funcConfig, null, 2)
     );
 
+    // 2. Copy Package.json
     const userPkg = await Bun.file(join(CWD, "package.json")).text();
     await Bun.write(join(FUNC_DIR, "package.json"), userPkg);
+
+    // 3. Generate Route Config (With Static Optimization)
+    let staticCacheRoutes: any[] = [];
+
+    if (isStaticArg) {
+      console.log("\n🔍 Analyzing routes for caching...");
+      try {
+        const analyzed = analyzeRoutes(CWD);
+
+        // Print Analysis Table
+        console.table(
+          analyzed.map((r) => ({
+            Method: r.method,
+            Path: r.path,
+            Type: r.type,
+            Details:
+              r.type === "STATIC"
+                ? "✅ Cached (12h)"
+                : `⚠️  ${r.reason || "Dynamic"}`,
+          }))
+        );
+
+        const staticRoutes = analyzed.filter((r) => r.type === "STATIC");
+
+        staticCacheRoutes = staticRoutes.map((route) => {
+          // Normalize Path: / -> /api, /users -> /api/users
+          const routePath = route.path === "/" ? "" : route.path;
+          return {
+            src: `^${routePath}$`,
+            headers: {
+              "cache-control":
+                "public, max-age=0, s-maxage=43200, stale-while-revalidate=600",
+            },
+            continue: true,
+          };
+        });
+      } catch (e) {
+        console.error(
+          "Warning: Route analysis failed, skipping static optimization.",
+          e
+        );
+      }
+    }
 
     const globalConfig = {
       version: 3,
       routes: [
+        // 1. Static Cache Overrides (Apply headers then continue)
+        ...staticCacheRoutes,
+
+        // 2. API Function Routing
         { src: "/api/(.*)", dest: "/api" },
+
+        // 3. Static Assets (Client)
         { handle: "filesystem" },
+
+        // 4. SPA Fallback
         { src: "/(.*)", dest: "/index.html" },
       ],
     };
+
     await Bun.write(
       join(BASE_OUT, "config.json"),
       JSON.stringify(globalConfig, null, 2)

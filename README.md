@@ -1,96 +1,91 @@
-# 1jm - Full-stack Framework
+# 1jm - Full-stack Framework for Bun
 
-A lightweight full-stack framework wrapping React and Hono for building full-stack apps.
+A lightweight full-stack framework combining React (Vite) for the frontend and Hono for the backend. Built specifically for the Bun runtime with native Vercel deployment support.
 
-## Structure
+## Why 1jm?
 
-```
-bin/cli.ts     # CLI entry point
-src/
- ├── index.ts   # Package exports (create, build, dev, start)
- ├── create.ts  # Create new projects from template
- ├── build.ts   # Build for production or Vercel
- ├── dev.ts     # Development server
- ├── start.ts   # Start production server
- └── template/  # Template files copied on create
-     ├── package.json
-     ├── tsconfig.json
-     ├── .gitignore
-     ├── client/
-     │   ├── index.html
-     │   └── src/
-     │       ├── main.tsx
-     │       └── App.tsx
-     └── server/
-         └── index.ts
-```
+- **Bun-native** - Built from the ground up for Bun. Uses Bun.serve, Bun.build, and Bun's native fetch
+- **Type-safe RPC** - Direct HTTP communication between client and server with full type inference
+- **Minimal Abstraction** - React on the client, Hono on the server. No magic, just standard APIs
+- **Vercel Integration** - Native Vercel Edge/Serverless output with automatic route analysis
+- **Static Route Caching** - Experimental feature to auto-detect static endpoints and cache them at CDN edge
+- **Fast Builds** - Bun.build for bundling, esbuild-powered Vite for development
 
-## Usage
+## When to Use
 
-### Create a new project
+- You want to use **Bun** as your server runtime
+- Building a React app with Hono API routes
+- Deploying to **Vercel** (Edge Functions or Serverless)
+- Need type-safe client-to-server communication without GraphQL/tRPC overhead
+- Want hot reload for both client and server
+
+## Quick Start
 
 ```bash
-# Using 1jm CLI directly
-bun run ./bin/cli.ts create my-app
-
-# Or install 1jm globally
-bun install -g 1jm
+# Create a new project (requires Bun)
+bunx 1jm-cli
 1jm create my-app
-```
-
-### Development
-
-```bash
 cd my-app
-bun run dev              # Start both client and server dev servers
-bun run dev --client     # Start only client dev server
-bun run dev --server     # Start only server dev server
+
+# Development - starts both client (Vite) and server (Bun)
+bun run dev
+
+# Production build
+bun run build
+
+# To generate Vercel deployment artifacts
+bun run build --vercel
 ```
 
-### Build
+## Project Structure
 
-```bash
-# Production build (outputs to dist/)
-bun run build            # Runs: 1jm build
-
-# Vercel deployment build (outputs to .vercel/output/)
-bun run build --vercel   # Runs: 1jm build --vercel
+```
+my-app/
+├── client/               # React frontend (Vite)
+│   ├── index.html
+│   └── src/
+│       ├── main.tsx
+│       └── App.tsx
+├── server/               # Hono backend
+│   └── index.ts          # Exports Hono app
+├── package.json
+└── tsconfig.json
 ```
 
-### Start Production Server
-
-```bash
-bun run start            # Runs: 1jm start
-```
-
-## Commands Reference
+## Commands
 
 | Command | Description |
 |---------|-------------|
-| `1jm create <name>` | Create a new project from template |
-| `1jm build` | Build for production (outputs to `dist/`) |
-| `1jm build --vercel` | Build for Vercel deployment |
-| `1jm dev` | Start development servers (client + server) |
-| `1jm dev --client` | Start only client dev server |
-| `1jm dev --server` | Start only server dev server |
-| `1jm start` | Start production server |
+| `1jm create <name>` | Create new project (interactive if no name) |
+| `1jm dev` | Start dev servers (client + server) |
+| `1jm dev --client` | Client dev server only (port 3000) |
+| `1jm dev --server` | Server dev server only (port 45828) |
+| `1jm build` | Production build (outputs to `dist/`) |
+| `1jm build --vercel` | Vercel build (outputs to `.vercel/output/`) |
+| `1jm build --vercel --experimental-static` | Vercel build with static route caching |
+| `1jm analyze` | Analyze routes for static/dynamic classification |
+| `1jm start` | Start production server from `dist/` |
 
-## Package as Framework
+## Runtime Support
 
-The `1jm` package can be used as a dev dependency:
+| Runtime | Support |
+|---------|---------|
+| **Bun** | Primary - full support |
+| **Vercel Edge** | Native via `--vercel` |
+| **Vercel Serverless** | Native via `--vercel` |
+| Node.js | Compatible (server exports fetch) |
 
-```json
-{
-  "devDependencies": {
-    "1jm": "latest"
-  },
-  "scripts": {
-    "dev": "1jm dev",
-    "build": "1jm build",
-    "build:vercel": "1jm build --vercel",
-    "start": "1jm start"
-  }
-}
-```
+## Features
 
-This allows the framework to be used both as a CLI and imported programmatically.
+- React 18 with TypeScript
+- Hono 4.x for backend
+- Vite for client development
+- Bun.serve for production server
+- Bun.build for bundling
+- Hot module reload (client + server)
+- Route analysis for static optimization
+- Proxy configuration via Vite
+
+## License
+
+MIT

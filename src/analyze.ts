@@ -104,7 +104,7 @@ export function analyzeRoutes(projectCwd: string = process.cwd()): RouteAnalysis
 
               results.push({
                 method: method.toUpperCase(),
-                path: fullPath,
+                path: "/api" + fullPath,
                 type: routeStatus,
                 reason: routeStatus === "DYNAMIC" ? failReason : undefined
               });

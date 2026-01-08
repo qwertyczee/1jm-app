@@ -85,6 +85,7 @@ async function main() {
     case "build": {
       await build({
         isVercel: flags.has("--vercel"),
+        static: flags.has("--experimental-static")
       });
       break;
     }
@@ -115,14 +116,15 @@ async function main() {
 1jm - Full-stack framework with Hono + Vite React for vercel on bun runtime
 
 Usage:
-  1jm create <name>     Create a new project
-  1jm build             Build for production
-  1jm build --vercel    Build for Vercel deployment
-  1jm dev               Start development server
-  1jm dev --client      Start client development server
-  1jm dev --server      Start backend development server
-  1jm analyze           Analyze static vs dynamic routes - experimental
-  1jm start             Start production server
+  1jm create <name>                         Create a new project
+  1jm build                                 Build for production
+  1jm build --vercel                        Build for Vercel deployment
+  1jm build --vercel --experimental-static  Build for Vercel with cached static endpoints   - experimental
+  1jm analyze                               Analyze static vs dynamic routes                - experimental
+  1jm dev                                   Start development server
+  1jm dev --client                          Start client development server
+  1jm dev --server                          Start backend development server
+  1jm start                                 Start production server
 
 Examples:
   1jm create my-app
