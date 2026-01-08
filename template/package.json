@@ -2,10 +2,10 @@
   "name": "{{NAME}}",
   "version": "0.0.1",
   "scripts": {
-    "dev": "bunx 1jm dev",
-    "start": "bunx 1jm start",
-    "build": "bunx 1jm build",
-    "build:vercel": "bunx 1jm build --vercel"
+    "dev": "1jm dev",
+    "start": "1jm start",
+    "build": "1jm build",
+    "build:vercel": "1jm build --vercel"
   },
   "dependencies": {
     "hono": "^4.0.0",
@@ -15,6 +15,7 @@
   "devDependencies": {
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@1jm/cli": "latest"
   }
 }

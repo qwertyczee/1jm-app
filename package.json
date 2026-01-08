@@ -1,12 +1,13 @@
 {
-  "name": "1jm",
+  "name": "1jm-cli",
   "version": "0.0.1",
   "description": "Full-stack framework with Hono + Vite React for Vercel on Bun runtime",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "type": "module",
   "bin": {
-    "1jm": "./dist/bin/cli.js"
+    "1jm": "./dist/bin/cli.js",
+    "1jm-cli": "./dist/bin/cli.js"
   },
   "files": [
     "dist/",
