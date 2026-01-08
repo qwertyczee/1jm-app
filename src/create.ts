@@ -1,5 +1,5 @@
 // src/create.ts
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { readdirSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,7 +24,7 @@ const getTemplateDir = () => {
 
 const TEMPLATE_DIR = getTemplateDir();
 
-export async function create(projectName: string) {
+export async function create(projectName: string, shouldOverrideExisting = false) {
   if (!projectName) {
     console.error("Please specify a project name: 1jm create <name>");
     process.exit(1);
@@ -34,6 +34,12 @@ export async function create(projectName: string) {
   const projectRoot = join(cwd, projectName);
 
   console.log(`\n✨ Creating project "${projectName}"...`);
+
+  // Remove existing directory if override is requested
+  if (existsSync(projectRoot) && shouldOverrideExisting) {
+    console.log(`🗑️  Removing existing directory...`);
+    await rm(projectRoot, { recursive: true, force: true });
+  }
 
   // Copy template files recursively
   await copyTemplate(TEMPLATE_DIR, projectRoot, projectName);

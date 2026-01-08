@@ -37,6 +37,7 @@
   "license": "MIT",
   "dependencies": {
     "@types/bun": "latest",
+    "prompts": "^2.4.2",
     "vite": "^7.3.1"
   },
   "peerDependencies": {
@@ -46,6 +47,7 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
+    "@types/prompts": "^2.4.9",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3"
   }

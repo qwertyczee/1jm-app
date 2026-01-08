@@ -1,16 +1,68 @@
 #!/usr/bin/env bun
 // bin/cli.ts
 import { start, build, create, dev } from "../src/index.js";
+import prompts from "prompts";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 const args = process.argv.slice(2);
 const command = args[0];
 const flags = new Set(args.slice(1));
 
+async function getProjectName(): Promise<string> {
+  const inputName = args[1];
+
+  // If user passed a name as argument, use it
+  if (inputName) {
+    // If it's ".", use "app" as default name
+    return inputName === "." ? "app" : inputName;
+  }
+
+  // Interactive prompt
+  const response = await prompts({
+    type: "text",
+    name: "projectName",
+    message: "What is the project name?",
+    initial: "app",
+    validate: (value: string) => {
+      if (!value || value.trim() === "") {
+        return "Project name cannot be empty";
+      }
+      return true;
+    },
+  });
+
+  return response.projectName || "app";
+}
+
+async function shouldOverride(targetDir: string): Promise<boolean> {
+  const response = await prompts({
+    type: "confirm",
+    name: "override",
+    message: `Directory "${targetDir}" already exists. Override?`,
+    initial: false,
+  });
+  return response.override;
+}
+
 async function main() {
   switch (command) {
     case "create": {
-      const projectName = args[1] || "app";
-      await create(projectName);
+      const projectName = await getProjectName();
+      const cwd = process.cwd();
+      const projectRoot = join(cwd, projectName);
+
+      // Check if directory exists
+      let shouldProceed = false;
+      if (existsSync(projectRoot)) {
+        shouldProceed = await shouldOverride(projectName);
+        if (!shouldProceed) {
+          console.log("Aborted.");
+          process.exit(0);
+        }
+      }
+
+      await create(projectName, shouldProceed);
       break;
     }
     case "build": {
