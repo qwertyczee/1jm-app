@@ -24,7 +24,9 @@ const getTemplateDir = () => {
 
 const TEMPLATE_DIR = getTemplateDir();
 
-export async function create(projectName: string, shouldOverrideExisting = false) {
+export async function create(projectName: string, options: { shouldOverrideExisting?: boolean; initGit?: boolean } = {}) {
+  const { shouldOverrideExisting = false, initGit = true } = options;
+
   if (!projectName) {
     console.error("Please specify a project name: 1jm create <name>");
     process.exit(1);
@@ -52,9 +54,21 @@ export async function create(projectName: string, shouldOverrideExisting = false
 
   console.log("📦 Installing dependencies...");
   try {
-    await $`cd ${projectRoot} && bun install`;
+    await $`cd ${projectRoot} && bun install`.quiet();
   } catch (e) {
     console.log("⚠️  Dependencies installed with some warnings.");
+  }
+
+  // Initialize git if requested
+  if (initGit) {
+    console.log("🔗 Initializing git repository...");
+    try {
+      await $`cd ${projectRoot} && git init`.quiet();
+      await $`cd ${projectRoot} && git add .`.quiet();
+      await $`cd ${projectRoot} && git commit -m "Initial commit"`.quiet();
+    } catch (e) {
+      console.log("⚠️  Git initialization failed.");
+    }
   }
 
   console.log(`\n✅ Project created!`);

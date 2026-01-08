@@ -45,6 +45,16 @@ async function shouldOverride(targetDir: string): Promise<boolean> {
   return response.override;
 }
 
+async function shouldInitGit(): Promise<boolean> {
+  const response = await prompts({
+    type: "confirm",
+    name: "git",
+    message: "Initialize git repository?",
+    initial: true,
+  });
+  return response.git;
+}
+
 async function main() {
   switch (command) {
     case "create": {
@@ -62,7 +72,10 @@ async function main() {
         }
       }
 
-      await create(projectName, shouldProceed);
+      // Ask to initialize git
+      const initGit = await shouldInitGit();
+
+      await create(projectName, { shouldOverrideExisting: shouldProceed, initGit });
       break;
     }
     case "build": {
