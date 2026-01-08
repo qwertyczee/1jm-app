@@ -19,6 +19,6 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
-  "include": ["src/index.ts", "src/create.ts", "src/build.ts", "src/dev.ts", "src/start.ts", "bin/cli.ts"],
+  "include": ["src/create.ts", "src/build.ts", "src/dev.ts", "src/start.ts", "bin/cli.ts"],
   "exclude": ["node_modules", "dist", "src/template"]
 }

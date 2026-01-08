@@ -1,6 +1,10 @@
 #!/usr/bin/env bun
 // bin/cli.ts
-import { start, build, create, dev } from "../src/index.js";
+import { create } from "../src/create.js";
+import { build } from "../src/build.js";
+import { dev } from "../src/dev.js";
+import { start } from "../src/start.js";
+import { analyzeRoutes } from "../src/analyze.js";
 import prompts from "prompts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -91,6 +95,17 @@ async function main() {
       });
       break;
     }
+    case "analyze": {
+      console.log("🔍 Scanning routes in server/index.ts...");
+      const results = analyzeRoutes(process.cwd());
+      
+      if (results.length === 0) {
+        console.log("No routes found or server/index.ts missing.");
+      } else {
+        console.table(results);
+      }
+      break;
+    }
     case "start": {
       await start();
       break;
@@ -106,6 +121,7 @@ Usage:
   1jm dev               Start development server
   1jm dev --client      Start client development server
   1jm dev --server      Start backend development server
+  1jm analyze           Analyze static vs dynamic routes - experimental
   1jm start             Start production server
 
 Examples:
