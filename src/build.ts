@@ -69,25 +69,6 @@ export async function build({ isVercel: isVercelArg }: { isVercel?: boolean }) {
     process.exit(1);
   }
 
-  let html = await Bun.file(CLIENT_ENTRY).text();
-
-  const entryPoint = clientBuild.outputs.find(
-    (o) => o.kind === "entry-point"
-  );
-  const jsFile = entryPoint ? basename(entryPoint.path) : "index.js";
-  const scriptSrc = `/${jsFile}`;
-
-  if (html.includes("src/main.tsx")) {
-    html = html.replace(/src\/main\.tsx/g, scriptSrc);
-  } else {
-    html = html.replace(
-      "</body>",
-      `<script type="module" src="${scriptSrc}"></script></body>`
-    );
-  }
-
-  await Bun.write(join(STATIC_DIR, "index.html"), html);
-
   const staticFiles = printFiles(STATIC_DIR);
 
   await Bun.build({
@@ -103,7 +84,10 @@ export async function build({ isVercel: isVercelArg }: { isVercel?: boolean }) {
   );
 
   const allFiles = [...staticFiles, ...serverFiles];
-  const maxNameLen = Math.max(...allFiles.map(f => f.name.length));
+  const maxNameLen =
+    allFiles.length > 0
+      ? Math.max(...allFiles.map((f) => f.name.length))
+      : 20;
 
   console.log("\nClient:");
   for (const file of staticFiles) {
