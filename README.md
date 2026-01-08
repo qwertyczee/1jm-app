@@ -77,7 +77,7 @@ my-app/
 
 ## Features
 
-- React 18 with TypeScript
+- React 19.x with TypeScript
 - Hono 4.x for backend
 - Vite for client development
 - Bun.serve for production server
