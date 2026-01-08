@@ -159,7 +159,7 @@ export async function build({
           // Normalize Path: / -> /api, /users -> /api/users
           const routePath = route.path === "/" ? "" : route.path;
           return {
-            src: `^${routePath}$`,
+            src: `^/api${routePath}$`,
             headers: {
               "cache-control":
                 "public, max-age=0, s-maxage=43200, stale-while-revalidate=600",
