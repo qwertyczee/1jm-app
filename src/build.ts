@@ -144,7 +144,7 @@ export async function build({
         console.table(
           analyzed.map((r) => ({
             Method: r.method,
-            Path: r.path,
+            Path: '/api' + r.path,
             Type: r.type,
             Details:
               r.type === "STATIC"

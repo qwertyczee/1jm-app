@@ -9,6 +9,20 @@ export type RouteAnalysis = {
   reason?: string;
 };
 
+const STATIC_EXTENSIONS = [
+  ".json",
+  ".yaml", ".yml",
+  ".txt", ".text",
+  ".md", ".markdown",
+  ".html", ".htm",
+  ".css",
+  ".csv",
+  ".xml",
+  ".sql",
+  ".graphql", ".gql",
+  ".png", ".jpg", ".jpeg", ".svg", ".ico"
+];
+
 /**
  * Analyzes the user's Hono server to detect static vs dynamic routes.
  * @param projectCwd The root directory of the user's project (default: process.cwd())
@@ -22,7 +36,6 @@ export function analyzeRoutes(projectCwd: string = process.cwd()): RouteAnalysis
     return [];
   }
 
-  // 1. Setup Optimized Program
   const configFile = ts.readConfigFile(TS_CONFIG, ts.sys.readFile);
   const configParseResult = ts.parseJsonConfigFileContent(configFile.config, ts.sys, projectCwd);
   
@@ -32,6 +45,8 @@ export function analyzeRoutes(projectCwd: string = process.cwd()): RouteAnalysis
     skipDefaultLibCheck: true,
     types: [],
     noEmit: true,
+    resolveJsonModule: true,
+    esModuleInterop: true,
   });
 
   const checker = program.getTypeChecker();
@@ -104,7 +119,7 @@ export function analyzeRoutes(projectCwd: string = process.cwd()): RouteAnalysis
 
               results.push({
                 method: method.toUpperCase(),
-                path: "/api" + fullPath,
+                path: fullPath,
                 type: routeStatus,
                 reason: routeStatus === "DYNAMIC" ? failReason : undefined
               });
@@ -164,6 +179,20 @@ function analyzeHandler(node: ts.Node, checker: ts.TypeChecker): { isStatic: boo
     const symbol = checker.getSymbolAtLocation(node);
     if (!symbol) return { isStatic: false, reason: "Unresolved Identifier" };
     
+    // Check aliases (imports) for Handlers
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+      const aliased = checker.getAliasedSymbol(symbol);
+      const decl = aliased.declarations?.[0];
+      if (decl) {
+         if (ts.isVariableDeclaration(decl) && decl.initializer) {
+           return analyzeHandler(decl.initializer, checker);
+         }
+         if (ts.isFunctionDeclaration(decl)) {
+           return analyzeFunctionBody(decl, checker);
+         }
+      }
+    }
+
     const decl = getDeclaration(symbol, checker);
     if (!decl) return { isStatic: false, reason: "No definition found" };
 
@@ -306,59 +335,102 @@ function isDeeplyStatic(node: ts.Node, checker: ts.TypeChecker, depth = 0): bool
 
   if (ts.isObjectLiteralExpression(node)) {
     return node.properties.every(p => {
-      // 1. Handle Spread Assignment: { ...base }
-      if (ts.isSpreadAssignment(p)) {
-         return isDeeplyStatic(p.expression, checker, depth + 1);
-      }
-
-      // 2. Handle Computed Properties: { [key]: val }
-      // Only check name if it exists and is computed
+      if (ts.isSpreadAssignment(p)) return isDeeplyStatic(p.expression, checker, depth + 1);
       if (p.name && ts.isComputedPropertyName(p.name)) {
         if (!isDeeplyStatic(p.name.expression, checker, depth + 1)) return false;
       }
-      
-      // 3. Handle Values (PropertyAssignment or Shorthand)
       if (ts.isPropertyAssignment(p)) return isDeeplyStatic(p.initializer, checker, depth + 1);
-      
       if (ts.isShorthandPropertyAssignment(p)) {
         const symbol = checker.getShorthandAssignmentValueSymbol(p);
         if (!symbol) return false;
-        const decl = getDeclaration(symbol, checker);
-        return decl && ts.isVariableDeclaration(decl) && decl.initializer 
-          ? isDeeplyStatic(decl.initializer, checker, depth + 1) 
-          : false;
+        return resolveIdentifierSymbol(symbol, checker, depth + 1);
       }
       return false; 
     });
   }
 
   if (ts.isPropertyAccessExpression(node)) {
-    const symbol = checker.getSymbolAtLocation(node);
-    if (!symbol) return false;
-    
-    const decl = getDeclaration(symbol, checker);
-    if (!decl) return false;
+    let root = node.expression;
+    while (ts.isPropertyAccessExpression(root)) {
+      root = root.expression;
+    }
 
-    if (ts.isPropertyAssignment(decl)) {
-      return isDeeplyStatic(decl.initializer, checker, depth + 1);
+    if (ts.isIdentifier(root)) {
+      const symbol = checker.getSymbolAtLocation(root);
+      if (symbol) {
+        if (isSymbolStaticImport(symbol)) return true;
+
+        const propSymbol = checker.getSymbolAtLocation(node);
+        if (!propSymbol) return false;
+        const decl = getDeclaration(propSymbol, checker);
+        if (decl && ts.isPropertyAssignment(decl)) {
+          return isDeeplyStatic(decl.initializer, checker, depth + 1);
+        }
+      }
     }
-    if (ts.isVariableDeclaration(decl) && decl.initializer) {
-      return isDeeplyStatic(decl.initializer, checker, depth + 1);
-    }
+    return false;
   }
 
+  // 5. Identifiers
   if (ts.isIdentifier(node)) {
     if (node.text === "undefined") return true;
     const symbol = checker.getSymbolAtLocation(node);
     if (!symbol) return false;
+    return resolveIdentifierSymbol(symbol, checker, depth);
+  }
 
-    const decl = getDeclaration(symbol, checker);
-    if (decl && ts.isVariableDeclaration(decl) && decl.initializer) {
-      const isConst = (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0;
-      if (!isConst) return false;
-      return isDeeplyStatic(decl.initializer, checker, depth + 1);
+  return false;
+}
+
+function isSymbolStaticImport(symbol: ts.Symbol): boolean {
+  const declarations = symbol.getDeclarations();
+  if (!declarations) return false;
+
+  for (const decl of declarations) {
+    // 1. import x from "file.yaml"
+    if (ts.isImportClause(decl) || ts.isImportSpecifier(decl) || ts.isNamespaceImport(decl)) {
+       const importDecl = findParentImportDeclaration(decl);
+       if (importDecl && ts.isStringLiteral(importDecl.moduleSpecifier)) {
+         const path = importDecl.moduleSpecifier.text;
+         if (STATIC_EXTENSIONS.some(ext => path.endsWith(ext))) return true;
+       }
     }
   }
+  return false;
+}
+
+function resolveIdentifierSymbol(symbol: ts.Symbol, checker: ts.TypeChecker, depth: number): boolean {
+  if (isSymbolStaticImport(symbol)) return true;
+
+  if (symbol.flags & ts.SymbolFlags.Alias) {
+    const aliased = checker.getAliasedSymbol(symbol);
+    const declarations = aliased.getDeclarations();
+    if (declarations && declarations.length > 0) {
+      const targetDecl = declarations[0];
+      if (!targetDecl) return false;
+      if (ts.isVariableDeclaration(targetDecl) && targetDecl.initializer) {
+         const isConst = (ts.getCombinedNodeFlags(targetDecl) & ts.NodeFlags.Const) !== 0;
+         if (isConst) {
+            return isDeeplyStatic(targetDecl.initializer, checker, depth + 1);
+         }
+      }
+      if (ts.isEnumMember(targetDecl)) {
+        if (targetDecl.initializer) return isDeeplyStatic(targetDecl.initializer, checker, depth + 1);
+        return true; 
+      }
+    }
+  }
+
+  const decl = getDeclaration(symbol, checker);
+  if (!decl) return false;
+
+  if (ts.isVariableDeclaration(decl) && decl.initializer) {
+    const isConst = (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0;
+    if (!isConst) return false;
+    return isDeeplyStatic(decl.initializer, checker, depth + 1);
+  }
+
+  if (ts.isEnumMember(decl)) return true;
 
   return false;
 }
@@ -369,4 +441,13 @@ function getDeclaration(symbol: ts.Symbol, checker: ts.TypeChecker): ts.Declarat
     return alias.valueDeclaration || alias.declarations?.[0];
   }
   return symbol.valueDeclaration || symbol.declarations?.[0];
+}
+
+function findParentImportDeclaration(node: ts.Node): ts.ImportDeclaration | undefined {
+  let curr: ts.Node | undefined = node;
+  while (curr) {
+    if (ts.isImportDeclaration(curr)) return curr;
+    curr = curr.parent;
+  }
+  return undefined;
 }

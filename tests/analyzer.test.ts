@@ -377,4 +377,66 @@ describe("Hono Route Analyzer", () => {
       expect(res[0].type).toBe("STATIC");
     });
   });
+
+  describe("12. JSON Imports (Feature Request)", () => {
+    it("detects direct JSON imports as STATIC", () => {
+      // This mimics "import largeStaticJson from './large.json'"
+      const dir = createTestEnv({
+        "large.json": JSON.stringify({ version: "1.0", items: [1, 2, 3] }),
+        "index.ts": `
+          import data from './large.json';
+          app.get('/large-json', (c) => c.json(data));
+        `
+      });
+      const res = analyzeRoutes(dir);
+      
+      expect(res[0].path).toBe("/large-json");
+      expect(res[0].type).toBe("STATIC");
+    });
+
+    it("detects nested properties from JSON as STATIC", () => {
+      // Verifies that accessing object properties on a JSON import works
+      const dir = createTestEnv({
+        "config.json": JSON.stringify({ meta: { title: "My Site" }, active: true }),
+        "index.ts": `
+          import config from './config.json';
+          app.get('/meta', (c) => c.json({ 
+            title: config.meta.title,
+            isActive: config.active
+          }));
+        `
+      });
+      const res = analyzeRoutes(dir);
+      expect(res[0].type).toBe("STATIC");
+    });
+
+    it("correctly identifies TypeScript files named like JSON as DYNAMIC if they contain logic", () => {
+      // Safety Check: A file named "data.json.ts" should NOT be treated as a static JSON file.
+      // It must be parsed as TypeScript.
+      const dir = createTestEnv({
+        "data.json.ts": `export const badData = { time: Date.now() };`,
+        "index.ts": `
+          import { badData } from './data.json'; // Resolves to .ts file
+          app.get('/trap', (c) => c.json(badData));
+        `
+      });
+      const res = analyzeRoutes(dir);
+      
+      // Should be DYNAMIC because it contains Date.now(), despite having ".json" in the filename
+      expect(res[0].type).toBe("DYNAMIC"); 
+      expect(res[0].reason).toContain("Response body has variables");
+    });
+
+    it("handles spread syntax on imported JSON", () => {
+      const dir = createTestEnv({
+        "base.json": JSON.stringify({ a: 1, b: 2 }),
+        "index.ts": `
+          import base from './base.json';
+          app.get('/spread', (c) => c.json({ ...base, c: 3 }));
+        `
+      });
+      const res = analyzeRoutes(dir);
+      expect(res[0].type).toBe("STATIC");
+    });
+  });
 });
