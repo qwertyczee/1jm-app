@@ -16,6 +16,6 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/bun": "latest",
-    "@1jm/cli": "latest"
+    "1jm-cli": "latest"
   }
 }
