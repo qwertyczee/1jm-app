@@ -1,8 +1,7 @@
 // src/build.ts
 import { rm, mkdir } from "node:fs/promises";
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
-import { existsSync } from "node:fs";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -29,7 +28,8 @@ function printFiles(dir: string, filterHidden = true) {
   return files;
 }
 
-export async function build({ isVercel }: { isVercel: boolean }) {
+export async function build({ isVercel: isVercelArg }: { isVercel?: boolean }) {
+  const isVercel = isVercelArg || !!process.env.VERCEL;
   const CWD = process.cwd();
 
   const BASE_OUT = isVercel ? join(CWD, ".vercel/output") : join(CWD, "dist");
