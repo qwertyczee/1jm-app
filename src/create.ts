@@ -8,6 +8,7 @@ import { $ } from "bun";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export type ProjectType = "fullstack-react-hono";
+export type DatabaseType = "none" | "prisma" | "drizzle";
 
 export interface CreateOptions {
   shouldOverrideExisting?: boolean;
@@ -15,6 +16,17 @@ export interface CreateOptions {
   projectType?: ProjectType;
   tailwind?: boolean;
   shadcn?: boolean;
+  database?: DatabaseType;
+}
+
+interface PackageJson {
+  name?: string;
+  version?: string;
+  type?: string;
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  [key: string]: unknown;
 }
 
 const getTemplatesRoot = () => {
@@ -31,6 +43,44 @@ const getTemplatesRoot = () => {
   throw new Error("Templates directory not found");
 };
 
+/**
+ * Deep merge package.json files
+ * Later sources override earlier ones for simple values
+ * Objects like dependencies/scripts are merged
+ */
+function mergePackageJson(...sources: PackageJson[]): PackageJson {
+  const result: PackageJson = {};
+
+  for (const source of sources) {
+    for (const [key, value] of Object.entries(source)) {
+      if (key === "dependencies" || key === "devDependencies" || key === "scripts") {
+        // Merge these objects
+        result[key] = {
+          ...(result[key] as Record<string, string> || {}),
+          ...(value as Record<string, string>),
+        };
+      } else {
+        // Override simple values
+        result[key] = value;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Read package.json from a template directory if it exists
+ */
+async function readPackageJson(templateDir: string): Promise<PackageJson | null> {
+  const pkgPath = join(templateDir, "package.json");
+  if (!existsSync(pkgPath)) {
+    return null;
+  }
+  const content = await readFile(pkgPath, "utf-8");
+  return JSON.parse(content);
+}
+
 export async function create(projectName: string, options: CreateOptions = {}) {
   const {
     shouldOverrideExisting = false,
@@ -38,6 +88,7 @@ export async function create(projectName: string, options: CreateOptions = {}) {
     projectType = "fullstack-react-hono",
     tailwind = false,
     shadcn = false,
+    database = "none",
   } = options;
 
   if (!projectName) {
@@ -57,6 +108,7 @@ export async function create(projectName: string, options: CreateOptions = {}) {
   if (tailwind) {
     console.log(`   shadcn/ui: ${shadcn ? "Yes" : "No"}`);
   }
+  console.log(`   Database: ${database === "none" ? "None" : database.charAt(0).toUpperCase() + database.slice(1)}`);
   console.log();
 
   // Remove existing directory if override is requested
@@ -65,20 +117,49 @@ export async function create(projectName: string, options: CreateOptions = {}) {
     await rm(projectRoot, { recursive: true, force: true });
   }
 
-  // Step 1: Copy base template
-  const baseTemplateDir = join(templatesRoot, "base");
-  await copyTemplate(baseTemplateDir, projectRoot, projectName);
+  // Collect all template directories to apply
+  const templateDirs: string[] = [];
 
-  // Step 2: If shadcn is selected, overlay shadcn template (includes tailwind)
+  // Step 1: Base template is always included
+  templateDirs.push(join(templatesRoot, "base"));
+
+  // Step 2: Add styling template
   if (shadcn && tailwind) {
-    const shadcnTemplateDir = join(templatesRoot, "shadcn");
-    await copyTemplate(shadcnTemplateDir, projectRoot, projectName);
+    templateDirs.push(join(templatesRoot, "shadcn"));
+  } else if (tailwind) {
+    templateDirs.push(join(templatesRoot, "tailwind"));
   }
-  // Step 3: Else if only tailwind is selected, overlay tailwind template
-  else if (tailwind) {
-    const tailwindTemplateDir = join(templatesRoot, "tailwind");
-    await copyTemplate(tailwindTemplateDir, projectRoot, projectName);
+
+  // Step 3: Add database template
+  if (database === "prisma") {
+    templateDirs.push(join(templatesRoot, "prisma"));
+  } else if (database === "drizzle") {
+    templateDirs.push(join(templatesRoot, "prisma"));
   }
+
+  // Copy all templates (excluding package.json which we'll merge)
+  for (const templateDir of templateDirs) {
+    await copyTemplate(templateDir, projectRoot, projectName, { skipPackageJson: true });
+  }
+
+  // Merge all package.json files
+  const packageJsons: PackageJson[] = [];
+  for (const templateDir of templateDirs) {
+    const pkg = await readPackageJson(templateDir);
+    if (pkg) {
+      packageJsons.push(pkg);
+    }
+  }
+
+  // Merge and write the final package.json
+  const mergedPackageJson = mergePackageJson(...packageJsons);
+  // Replace {{NAME}} placeholder
+  mergedPackageJson.name = projectName;
+  
+  await writeFile(
+    join(projectRoot, "package.json"),
+    JSON.stringify(mergedPackageJson, null, 2) + "\n"
+  );
 
   console.log("   Installing dependencies...");
   try {
@@ -102,21 +183,40 @@ export async function create(projectName: string, options: CreateOptions = {}) {
   console.log(`\n Project created successfully!`);
   console.log(`\nNext steps:`);
   console.log(`  cd ${projectName}`);
+  if (database === "prisma" || database === "drizzle") {
+    console.log(`  bun run db:push        # Push schema to database`);
+  }
   console.log(`  bun run dev\n`);
 }
 
-async function copyTemplate(src: string, dest: string, projectName: string) {
+interface CopyOptions {
+  skipPackageJson?: boolean;
+}
+
+async function copyTemplate(
+  src: string,
+  dest: string,
+  projectName: string,
+  options: CopyOptions = {}
+) {
+  const { skipPackageJson = false } = options;
+  
   await mkdir(dest, { recursive: true });
 
   const entries = readdirSync(src, { withFileTypes: true });
 
   for (const entry of entries) {
+    // Skip package.json if we're merging them separately
+    if (skipPackageJson && entry.name === "package.json") {
+      continue;
+    }
+
     const srcPath = join(src, entry.name);
     const destName = entry.name.replace("{{NAME}}", projectName);
     const destPath = join(dest, destName);
 
     if (entry.isDirectory()) {
-      await copyTemplate(srcPath, destPath, projectName);
+      await copyTemplate(srcPath, destPath, projectName, options);
     } else {
       // Check if it's a binary file (images, etc.) or text file
       const binaryExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff', '.woff2', '.ttf', '.eot'];

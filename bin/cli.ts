@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // bin/cli.ts
-import { create } from "../src/create.js";
+import { create, type DatabaseType } from "../src/create.js";
 import { build } from "../src/build.js";
 import { dev } from "../src/dev.js";
 import { start } from "../src/start.js";
@@ -59,6 +59,21 @@ async function shouldInitGit(): Promise<boolean> {
   return response.git;
 }
 
+async function selectDatabase(): Promise<DatabaseType> {
+  const response = await prompts({
+    type: "select",
+    name: "database",
+    message: "Select database:",
+    choices: [
+      { title: "None", value: "none" },
+      { title: "Prisma", value: "prisma" },
+      { title: "Drizzle - comming soon, (this is still prisma)", value: "drizzle" },
+    ],
+    initial: 0,
+  });
+  return response.database || "none";
+}
+
 async function selectStyling(): Promise<{ tailwind: boolean; shadcn: boolean }> {
   const tailwindResponse = await prompts({
     type: "confirm",
@@ -101,10 +116,13 @@ async function main() {
       // Ask about styling
       const { tailwind, shadcn } = await selectStyling();
 
+      // Ask about database
+      const database = await selectDatabase();
+
       // Ask to initialize git
       const initGit = await shouldInitGit();
 
-      await create(projectName, { shouldOverrideExisting: shouldProceed, initGit, tailwind, shadcn });
+      await create(projectName, { shouldOverrideExisting: shouldProceed, initGit, database, tailwind, shadcn });
       break;
     }
     case "build": {
