@@ -25,6 +25,13 @@ A lightweight full-stack framework combining React (Vite) for the frontend and H
 # Create a new project (requires Bun)
 bunx 1jm-cli
 1jm create my-app
+
+# Interactive setup will ask for:
+# - Project Name
+# - Database selection (Prisma available, Drizzle coming soon)
+# - Styling options (Tailwind CSS, shadcn/ui)
+# - Git initialization
+
 cd my-app
 
 # Development - starts both client (Vite) and server (Bun)
@@ -37,6 +44,18 @@ bun run build
 bun run build --vercel
 ```
 
+## Features & Tech Stack
+
+- **Frontend:** React 19.x with TypeScript, Vite
+- **Backend:** Hono 4.x
+- **Runtime:** Bun (primary), Node.js compatible
+- **Styling Options:**
+  - Tailwind CSS v4
+  - shadcn/ui components
+- **Database Support:**
+  - ✅ **Prisma** (SQLite default, easily swappable)
+  - 🚧 **Drizzle** (Coming Soon)
+
 ## Project Structure
 
 ```
@@ -47,7 +66,9 @@ my-app/
 │       ├── main.tsx
 │       └── App.tsx
 ├── server/               # Hono backend
+│   ├── db.ts             # Database client (if selected)
 │   └── index.ts          # Exports Hono app
+├── prisma/               # Prisma schema (if selected)
 ├── package.json
 └── tsconfig.json
 ```
@@ -74,17 +95,6 @@ my-app/
 | **Vercel Edge** | Native via `--vercel` |
 | **Vercel Serverless** | Native via `--vercel` |
 | Node.js | Compatible (server exports fetch) |
-
-## Features
-
-- React 19.x with TypeScript
-- Hono 4.x for backend
-- Vite for client development
-- Bun.serve for production server
-- Bun.build for bundling
-- Hot module reload (client + server)
-- Route analysis for static optimization
-- Proxy configuration via Vite
 
 ## License
 

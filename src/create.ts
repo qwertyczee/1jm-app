@@ -185,6 +185,7 @@ export async function create(projectName: string, options: CreateOptions = {}) {
   console.log(`  cd ${projectName}`);
   if (database === "prisma" || database === "drizzle") {
     console.log(`  bun run db:push        # Push schema to database`);
+    console.log(`  bun run db:generate    # Generate client for db`);
   }
   console.log(`  bun run dev\n`);
 }
