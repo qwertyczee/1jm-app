@@ -59,6 +59,28 @@ async function shouldInitGit(): Promise<boolean> {
   return response.git;
 }
 
+async function selectStyling(): Promise<{ tailwind: boolean; shadcn: boolean }> {
+  const tailwindResponse = await prompts({
+    type: "confirm",
+    name: "tailwind",
+    message: "Add Tailwind CSS?",
+    initial: true,
+  });
+
+  let shadcn = false;
+  if (tailwindResponse.tailwind) {
+    const shadcnResponse = await prompts({
+      type: "confirm",
+      name: "shadcn",
+      message: "Add shadcn/ui?",
+      initial: true,
+    });
+    shadcn = shadcnResponse.shadcn;
+  }
+
+  return { tailwind: tailwindResponse.tailwind, shadcn };
+}
+
 async function main() {
   switch (command) {
     case "create": {
@@ -76,10 +98,13 @@ async function main() {
         }
       }
 
+      // Ask about styling
+      const { tailwind, shadcn } = await selectStyling();
+
       // Ask to initialize git
       const initGit = await shouldInitGit();
 
-      await create(projectName, { shouldOverrideExisting: shouldProceed, initGit });
+      await create(projectName, { shouldOverrideExisting: shouldProceed, initGit, tailwind, shadcn });
       break;
     }
     case "build": {
