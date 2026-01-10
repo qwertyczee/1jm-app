@@ -20,5 +20,5 @@
     "noPropertyAccessFromIndexSignature": false
   },
   "include": ["src/create.ts", "src/build.ts", "src/dev.ts", "src/start.ts", "bin/cli.ts"],
-  "exclude": ["node_modules", "dist", "src/template"]
+  "exclude": ["node_modules", "dist", "templates"]
 }
