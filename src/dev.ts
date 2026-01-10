@@ -1,6 +1,6 @@
-import { createServer } from "vite";
 import { join, resolve } from "node:path";
-import { watch } from "node:fs";
+import { watch, existsSync } from "node:fs";
+import type { ViteDevServer } from "vite";
 
 const S = "\x1b[35m[SERVER]\x1b[0m";
 const C = "\x1b[36m[CLIENT]\x1b[0m";
@@ -75,8 +75,17 @@ export async function dev({
 
   if (useClient) {
     if (!(await isPortInUse(CLIENT_PORT))) {
-      const vite = await createServer({
-        root: resolve(CWD, "client"),
+      // Check if project has a vite.config.ts
+      const viteConfigPath = resolve(CWD, "vite.config.ts");
+      const hasViteConfig = existsSync(viteConfigPath);
+
+      // Dynamic import to ensure ESM
+      const { createServer } = await import("vite");
+      
+      const vite: ViteDevServer = await createServer({
+        // Use configFile if exists, otherwise use inline config
+        configFile: hasViteConfig ? viteConfigPath : false,
+        root: hasViteConfig ? undefined : resolve(CWD, "client"),
         server: {
           port: CLIENT_PORT,
           strictPort: true,
