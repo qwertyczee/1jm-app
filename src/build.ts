@@ -3,6 +3,7 @@ import { rm, mkdir } from "node:fs/promises";
 import { readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { analyzeRoutes } from "./analyze.js";
+import tailwind from "bun-plugin-tailwind";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -31,35 +32,51 @@ function printFiles(dir: string, filterHidden = true) {
 
 export async function build({
   isVercel: isVercelArg,
+  isCloudflare: isCloudflareArg,
   static: isStaticArg,
 }: {
   isVercel?: boolean;
+  isCloudflare?: boolean;
   static?: boolean;
 }) {
   const isVercel = isVercelArg || !!process.env.VERCEL;
+  const isCloudflare = isCloudflareArg || !!process.env.CF_WORKER;
   const CWD = process.cwd();
 
   const BASE_OUT = isVercel ? join(CWD, ".vercel/output") : join(CWD, "dist");
 
-  const FUNC_DIR = isVercel
-    ? join(BASE_OUT, "functions/api.func")
-    : join(BASE_OUT, "server");
+  let FUNC_DIR: string;
+  let STATIC_DIR: string;
 
-  const STATIC_DIR = isVercel
-    ? join(BASE_OUT, "static")
-    : join(BASE_OUT, "public");
+  if (isVercel) {
+    FUNC_DIR = join(BASE_OUT, "functions/api.func");
+    STATIC_DIR = join(BASE_OUT, "static");
+  } else if (isCloudflare) {
+    FUNC_DIR = BASE_OUT;
+    STATIC_DIR = join(BASE_OUT, "assets");
+  } else {
+    FUNC_DIR = join(BASE_OUT, "server");
+    STATIC_DIR = join(BASE_OUT, "public");
+  }
 
   const CLIENT_ENTRY = join(CWD, "client/index.html");
   const SERVER_ENTRY = join(CWD, "server/index.ts");
 
-  console.log(`\nBuilding for ${isVercel ? "Vercel" : "Production"}...`);
+  console.log(`\nBuilding for ${isVercel ? "Vercel" : isCloudflare ? "Cloudflare Workers (Assets)" : "Production"}...`);
+  
   if (isVercel && isStaticArg) {
     console.log("⚡ Static Optimization Enabled");
   }
 
   await rm(BASE_OUT, { recursive: true, force: true });
-  await mkdir(FUNC_DIR, { recursive: true });
-  await mkdir(STATIC_DIR, { recursive: true });
+  await mkdir(BASE_OUT, { recursive: true });
+  
+  if (isVercel) {
+    await mkdir(FUNC_DIR, { recursive: true });
+    await mkdir(STATIC_DIR, { recursive: true });
+  } else if (isCloudflare) {
+    await mkdir(STATIC_DIR, { recursive: true });
+  }
 
   if (!existsSync(CLIENT_ENTRY)) {
     throw new Error(`Client entry not found: ${CLIENT_ENTRY}`);
@@ -72,6 +89,7 @@ export async function build({
     minify: true,
     packages: "bundle",
     sourcemap: "none",
+    plugins: [tailwind],
   });
 
   if (!clientBuild.success) {
@@ -81,23 +99,34 @@ export async function build({
 
   const staticFiles = printFiles(STATIC_DIR);
 
-  await Bun.build({
-    entrypoints: [SERVER_ENTRY],
-    outdir: FUNC_DIR,
-    target: "bun",
-    minify: true,
-    naming: "index.js",
-  });
+  if (isCloudflare) {
+    await Bun.build({
+      entrypoints: [SERVER_ENTRY],
+      outdir: FUNC_DIR,
+      naming: "worker.js",
+      target: "browser",
+      format: "esm",
+      minify: true,
+    });
+  } else {
+    await Bun.build({
+      entrypoints: [SERVER_ENTRY],
+      outdir: FUNC_DIR,
+      target: "bun",
+      minify: true,
+      naming: "index.js",
+    });
+  }
 
   const serverFiles = printFiles(FUNC_DIR).filter(
-    (f) => !f.name.includes(".vc-config") && !f.name.includes("package.json")
+    (f) => !f.name.includes(".vc-config") && 
+           !f.name.includes("package.json") && 
+           !f.name.endsWith(".html") && 
+           !f.name.includes("assets/")
   );
 
   const allFiles = [...staticFiles, ...serverFiles];
-  const maxNameLen =
-    allFiles.length > 0
-      ? Math.max(...allFiles.map((f) => f.name.length))
-      : 20;
+  const maxNameLen = allFiles.length > 0 ? Math.max(...allFiles.map((f) => f.name.length)) : 20;
 
   console.log("\nClient:");
   for (const file of staticFiles) {
@@ -111,8 +140,76 @@ export async function build({
     console.log(`  ${paddedName}  ${file.size}`);
   }
 
-  if (isVercel) {
-    // 1. Generate Function Config
+  if (isCloudflare) {
+    const headersContent = `/
+  Cache-Control: public, max-age=0, s-maxage=31536000, must-revalidate
+/index.html
+  Cache-Control: public, max-age=0, s-maxage=31536000, must-revalidate
+/*.js
+  Cache-Control: public, max-age=31536000, immutable
+/*.css
+  Cache-Control: public, max-age=31536000, immutable
+/*.png
+  Cache-Control: public, max-age=31536000, immutable
+/*.jpg
+  Cache-Control: public, max-age=31536000, immutable
+/*.svg
+  Cache-Control: public, max-age=31536000, immutable
+/*.woff2
+  Cache-Control: public, max-age=31536000, immutable
+`;
+    await Bun.write(join(STATIC_DIR, "_headers"), headersContent);
+
+    const hasWranglerJson = existsSync(join(CWD, "wrangler.json"));
+    const hasWranglerJsonc = existsSync(join(CWD, "wrangler.jsonc"));
+    const hasWranglerToml = existsSync(join(CWD, "wrangler.toml"));
+
+    if (!hasWranglerJson && !hasWranglerJsonc && !hasWranglerToml) {
+      console.log("\n⚙️  Creating wrangler.jsonc in root...");
+
+      // Read package.json to get the project name
+      const packageJsonPath = join(CWD, "package.json");
+      let projectName = "my-app";
+
+      if (existsSync(packageJsonPath)) {
+        const pkg = await Bun.file(packageJsonPath).json();
+        if (pkg.name) {
+          projectName = pkg.name;
+        }
+      }
+
+      const wranglerConfig = {
+        $schema: "node_modules/wrangler/config-schema.json",
+        name: projectName,
+        main: "./dist/worker.js",
+        compatibility_date: "2026-01-11",
+        compatibility_flags: ["nodejs_compat"],
+        assets: {
+          directory: "./dist/assets",
+          binding: "ASSETS",
+          not_found_handling: "single-page-application",
+          run_worker_first: ["/api/*"],
+        },
+        observability: {
+          enabled: true,
+        },
+      };
+
+      await Bun.write(
+        join(CWD, "wrangler.jsonc"),
+        JSON.stringify(wranglerConfig, null, 2)
+      );
+    } else {
+      console.log("\n⚠️  Found existing wrangler config. Skipping generation.");
+      console.log("   Ensure 'main' points to './dist/worker.js'");
+      console.log("   Ensure 'assets.directory' points to './dist/assets'");
+    }
+
+    console.log("\n✅ Build Complete!");
+    console.log("   👉 Deploy with: bunx wrangler deploy");
+  } 
+  
+  else if (isVercel) {
     const funcConfig = {
       handler: "index.js",
       runtime: "bun1.x",

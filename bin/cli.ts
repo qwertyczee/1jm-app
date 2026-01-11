@@ -128,6 +128,7 @@ async function main() {
     case "build": {
       await build({
         isVercel: flags.has("--vercel"),
+        isCloudflare: flags.has("--cloudflare"),
         static: flags.has("--experimental-static")
       });
       break;
@@ -156,11 +157,12 @@ async function main() {
     }
     default:
       console.log(`
-1jm - Full-stack framework with Hono + Vite React for vercel on bun runtime
+1jm - Full-stack framework with Hono + Vite React
 
 Usage:
   1jm create <name>                         Create a new project
   1jm build                                 Build for production
+  1jm build --cloudflare                    Build for Cloudflare Workers
   1jm build --vercel                        Build for Vercel deployment
   1jm build --vercel --experimental-static  Build for Vercel with cached static endpoints   - experimental
   1jm analyze                               Analyze static vs dynamic routes                - experimental
