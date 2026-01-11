@@ -104,7 +104,7 @@ export async function build({
       entrypoints: [SERVER_ENTRY],
       outdir: FUNC_DIR,
       naming: "worker.js",
-      target: "browser",
+      target: "bun",
       format: "esm",
       minify: true,
     });
